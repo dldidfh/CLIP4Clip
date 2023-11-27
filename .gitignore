@@ -1,2 +1,10 @@
 .git
 .idea
+datas/
+test.py
+ckpts/
+__pycache__
+test.sh 
+train_nsys.sh 
+ncp_c0123.sh
+hpc_c3.sh

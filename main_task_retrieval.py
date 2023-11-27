@@ -17,7 +17,7 @@ from modules.optimization import BertAdam
 
 from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
-
+import nvtx 
 torch.distributed.init_process_group(backend="nccl")
 
 global logger
@@ -75,7 +75,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument("--datatype", default="msrvtt", type=str, help="Point the dataset to finetune.")
 
     parser.add_argument("--world_size", default=0, type=int, help="distribted training")
-    parser.add_argument("--local_rank", default=0, type=int, help="distribted training")
+    parser.add_argument("--local-rank", default=0, type=int, help="distribted training")
     parser.add_argument("--rank", default=0, type=int, help="distribted training")
     parser.add_argument('--coef_lr', type=float, default=1., help='coefficient for bert branch.')
     parser.add_argument('--use_mil', action='store_true', help="Whether use MIL as Miech et. al. (2020).")
@@ -251,54 +251,70 @@ def load_model(epoch, args, n_gpu, device, model_file=None):
 
 def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, scheduler, global_step, local_rank=0):
     global logger
-    torch.cuda.empty_cache()
-    model.train()
-    log_step = args.n_display
-    start_time = time.time()
-    total_loss = 0
+    with nvtx.annotate(f"train start epoch{epoch}", color="purple"):
+    # nvtx.push_range(f"train start epoch{epoch}", color="purple")
+        torch.cuda.empty_cache()
+        model.train()
+        log_step = args.n_display
+        start_time = time.time()
+        total_loss = 0
 
-    for step, batch in enumerate(train_dataloader):
-        if n_gpu == 1:
-            # multi-gpu does scattering it-self
-            batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
+        for step, batch in enumerate(train_dataloader):
+            
+            with nvtx.annotate(f"epoch {epoch} step {step}", color="green"):
+            # nvtx.push_range(f"epoch {epoch} step {step}", color="green")
+                if n_gpu == 1:
+                    # multi-gpu does scattering it-self
+                    batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
 
-        input_ids, input_mask, segment_ids, video, video_mask = batch
-        loss = model(input_ids, segment_ids, input_mask, video, video_mask)
+                input_ids, input_mask, segment_ids, video, video_mask = batch
+                with nvtx.annotate(f"model inference", color="yellow"):
+                # nvtx.push_range(f"model inference")
+                    loss = model(input_ids, segment_ids, input_mask, video, video_mask)
+                # nvtx.pop_range(f"model inference")
 
-        if n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu.
-        if args.gradient_accumulation_steps > 1:
-            loss = loss / args.gradient_accumulation_steps
+                with nvtx.annotate(f"loss calc", color="red"):
+                # nvtx.push_range(f"loss calc")
+                    if n_gpu > 1:
+                        loss = loss.mean()  # mean() to average on multi-gpu.
+                    if args.gradient_accumulation_steps > 1:
+                        loss = loss / args.gradient_accumulation_steps
+                # nvtx.pop_range(f"loss calc")
 
-        loss.backward()
+                with nvtx.annotate(f"backward", color="blue"):
+                # nvtx.push_range(f"backward")
+                    loss.backward()
+                # nvtx.pop_range(f"backward")
 
-        total_loss += float(loss)
-        if (step + 1) % args.gradient_accumulation_steps == 0:
+                total_loss += float(loss)
+                if (step + 1) % args.gradient_accumulation_steps == 0:
 
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
-            if scheduler is not None:
-                scheduler.step()  # Update learning rate schedule
+                    if scheduler is not None:
+                        scheduler.step()  # Update learning rate schedule
 
-            optimizer.step()
-            optimizer.zero_grad()
+                    optimizer.step()
+                    optimizer.zero_grad()
 
-            # https://github.com/openai/CLIP/issues/46
-            if hasattr(model, 'module'):
-                torch.clamp_(model.module.clip.logit_scale.data, max=np.log(100))
-            else:
-                torch.clamp_(model.clip.logit_scale.data, max=np.log(100))
+                    # https://github.com/openai/CLIP/issues/46
+                    if hasattr(model, 'module'):
+                        torch.clamp_(model.module.clip.logit_scale.data, max=np.log(100))
+                    else:
+                        torch.clamp_(model.clip.logit_scale.data, max=np.log(100))
 
-            global_step += 1
-            if global_step % log_step == 0 and local_rank == 0:
-                logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
-                            args.epochs, step + 1,
-                            len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
-                            float(loss),
-                            (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
-                start_time = time.time()
+                    global_step += 1
+                    if global_step % log_step == 0 and local_rank == 0:
+                        logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
+                                    args.epochs, step + 1,
+                                    len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
+                                    float(loss),
+                                    (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
+                        start_time = time.time()
+            # nvtx.pop_range(f"epoch {epoch} step {step}")
 
-    total_loss = total_loss / len(train_dataloader)
+        total_loss = total_loss / len(train_dataloader)
+        # nvtx.pop_range(f"train start epoch{epoch}")
     return total_loss, global_step
 
 def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_list, batch_visual_output_list):
