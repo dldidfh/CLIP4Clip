@@ -183,11 +183,14 @@ class MSRVTT_TrainDataLoader(Dataset):
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
             if use_ram:
+                from tqdm.contrib.concurrent import process_map
+                from tqdm import tqdm
                 import multiprocessing as mp 
-                with mp.Pool(num_workers or mp.cpu_count()) as p: 
-                    result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
+                # result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count())
+                result = [self.prepare_video_datas_with_ram(id) for id in tqdm(train_video_ids)]
+                # with mp.Pool(num_workers or mp.cpu_count()) as p: 
+                    # result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
                 self.video_dict = {r[0]:r[1] for r in result}
-                # self.video_dict = dict(result)
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)
