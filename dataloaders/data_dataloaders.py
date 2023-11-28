@@ -19,7 +19,8 @@ def dataloader_msrvtt_train(args, tokenizer):
         unfold_sentences=args.expand_msrvtt_sentences,
         frame_order=args.train_frame_order,
         slice_framepos=args.slice_framepos,
-        use_ram=args.use_ram
+        use_ram=args.use_ram,
+        num_workers=args.num_thread_reader
     )
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset)

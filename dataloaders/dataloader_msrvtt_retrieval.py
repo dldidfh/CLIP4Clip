@@ -152,7 +152,8 @@ class MSRVTT_TrainDataLoader(Dataset):
             image_resolution=224,
             frame_order=0,
             slice_framepos=0,
-            use_ram=False
+            use_ram=False,
+            num_workers=0,
     ):
         self.csv = pd.read_csv(csv_path)
         self.data = json.load(open(json_path, 'r'))
@@ -182,7 +183,11 @@ class MSRVTT_TrainDataLoader(Dataset):
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
             if use_ram:
-                self.prepare_video_datas_with_ram(train_video_ids)
+                import multiprocessing as mp 
+                with mp.Pool(num_workers or mp.cpu_count()) as p: 
+                    result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
+                self.video_dict = {r[0]:r[1] for r in result}
+                # self.video_dict = dict(result)
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)
@@ -208,14 +213,13 @@ class MSRVTT_TrainDataLoader(Dataset):
         
     def __len__(self):
         return self.sample_len
-    def prepare_video_datas_with_ram(self, video_ids):
-        self.video_dict = {}
-        for video_id in tqdm(desc="train data loading", iterable=video_ids):
-            video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
-            if os.path.exists(video_path) is False:
-                video_path = video_path.replace(".mp4", ".webm")
-            raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
-            self.video_dict[video_id] = raw_video_data['video']
+    # @staticmethod
+    def prepare_video_datas_with_ram(self, video_id):
+        video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
+        if os.path.exists(video_path) is False:
+            video_path = video_path.replace(".mp4", ".webm")
+        raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
+        return [video_id,raw_video_data['video']]
 
     @nvtx.annotate("_get_text()", color="purple")
     def _get_text(self, video_id, caption=None):
