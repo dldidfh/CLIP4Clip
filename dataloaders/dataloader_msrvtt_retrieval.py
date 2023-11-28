@@ -186,7 +186,7 @@ class MSRVTT_TrainDataLoader(Dataset):
                 from tqdm.contrib.concurrent import process_map
                 from tqdm import tqdm
                 import multiprocessing as mp 
-                # result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count())
+                result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count(), chunksize=len(train_video_ids) // num_workers or mp.cpu_count())
                 result = [self.prepare_video_datas_with_ram(id) for id in tqdm(train_video_ids)]
                 # with mp.Pool(num_workers or mp.cpu_count()) as p: 
                     # result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
