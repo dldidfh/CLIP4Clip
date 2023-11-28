@@ -183,15 +183,26 @@ class MSRVTT_TrainDataLoader(Dataset):
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
             if use_ram:
-                from tqdm.contrib.concurrent import process_map
+                # from tqdm.contrib.concurrent import process_map
                 from tqdm import tqdm
+                from multiprocessing.pool import ThreadPool
                 import multiprocessing as mp 
-                chunk_size = len(train_video_ids) // ((num_workers or mp.cpu_count()) * 2)
-                result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count(), chunksize=chunk_size)
-                result = [self.prepare_video_datas_with_ram(id) for id in tqdm(train_video_ids)]
+                LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))
+                self.video_dict = {}
+                # chunk_size = len(train_video_ids) // ((num_workers or mp.cpu_count()) * 2)
+                result = ThreadPool(num_workers or mp.cpu_count()).imap(self.prepare_video_datas_with_ram, train_video_ids)
+                pbar = tqdm(enumerate(result), total=len(train_video_ids), disable=LOCAL_RANK > 0)
+                gb = 1 << 30 
+                for i, x in pbar:
+                    self.video_dict[x[0]] = x[1]
+                    b = x[1].nbytes
+                    pbar.desc = f'Caching images ({b / gb:.1f}GB RAM)'
+                pbar.close()
+                # result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count(), chunksize=chunk_size)
+                # result = [self.prepare_video_datas_with_ram(id) for id in tqdm(train_video_ids)]
                 # with mp.Pool(num_workers or mp.cpu_count()) as p: 
                     # result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
-                self.video_dict = {r[0]:r[1] for r in result}
+                # self.video_dict = {r[0]:r[1] for r in result}
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)
