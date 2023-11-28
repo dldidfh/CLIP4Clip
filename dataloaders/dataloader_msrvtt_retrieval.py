@@ -12,6 +12,7 @@ import json
 import random
 from dataloaders.rawvideo_util import RawVideoExtractor
 import nvtx 
+from tqdm import tqdm 
 class MSRVTT_DataLoader(Dataset):
     """MSRVTT dataset loader."""
     def __init__(
@@ -209,7 +210,7 @@ class MSRVTT_TrainDataLoader(Dataset):
         return self.sample_len
     def prepare_video_datas_with_ram(self, video_ids):
         self.video_dict = {}
-        for video_id in video_ids:
+        for video_id in tqdm(desc="train data loading", iterable=video_ids):
             video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
             if os.path.exists(video_path) is False:
                 video_path = video_path.replace(".mp4", ".webm")
@@ -279,7 +280,7 @@ class MSRVTT_TrainDataLoader(Dataset):
                     video_path = video_path.replace(".mp4", ".webm")
                 raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
                 raw_video_data = raw_video_data['video']
-                
+
             if len(raw_video_data.shape) > 3:
                 raw_video_data_clip = raw_video_data
                 # L x T x 3 x H x W
