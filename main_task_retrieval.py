@@ -104,6 +104,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
 
     parser.add_argument("--pretrained_clip_name", default="ViT-B/32", type=str, help="Choose a CLIP version")
 
+    parser.add_argument('--use_ram', action='store_true', help="store dataset in ram or read from file every iterations")
     args = parser.parse_args()
 
     if args.sim_header == "tightTransf":
@@ -334,6 +335,7 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
         sim_matrix.append(each_row)
     return sim_matrix
 
+@nvtx.annotate("eval_epoch()", color="purple")
 def eval_epoch(args, model, test_dataloader, device, n_gpu):
 
     if hasattr(model, 'module'):

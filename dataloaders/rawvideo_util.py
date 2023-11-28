@@ -5,7 +5,7 @@ from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 # pip install opencv-python
 import cv2
-
+import nvtx
 class RawVideoExtractorCV2():
     def __init__(self, centercrop=False, size=224, framerate=-1, ):
         self.centercrop = centercrop
@@ -21,8 +21,8 @@ class RawVideoExtractorCV2():
             ToTensor(),
             Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
         ])
-
-    def video_to_tensor(self, video_file, preprocess, sample_fp=0, start_time=None, end_time=None):
+    @nvtx.annotate("video_to_tensor()", color="purple")
+    def video_to_tensor(self, video_file, preprocess, sample_fp:int=0, start_time=None, end_time=None):
         if start_time is not None or end_time is not None:
             assert isinstance(start_time, int) and isinstance(end_time, int) \
                    and start_time > -1 and end_time > start_time
@@ -76,6 +76,7 @@ class RawVideoExtractorCV2():
         image_input = self.video_to_tensor(video_path, self.transform, sample_fp=self.framerate, start_time=start_time, end_time=end_time)
         return image_input
 
+    @nvtx.annotate("process_raw_data()", color="purple")
     def process_raw_data(self, raw_video_data):
         tensor_size = raw_video_data.size()
         tensor = raw_video_data.view(-1, 1, tensor_size[-3], tensor_size[-2], tensor_size[-1])

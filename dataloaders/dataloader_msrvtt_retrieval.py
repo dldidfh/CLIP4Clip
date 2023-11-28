@@ -11,7 +11,7 @@ from collections import defaultdict
 import json
 import random
 from dataloaders.rawvideo_util import RawVideoExtractor
-
+import nvtx 
 class MSRVTT_DataLoader(Dataset):
     """MSRVTT dataset loader."""
     def __init__(
@@ -145,12 +145,13 @@ class MSRVTT_TrainDataLoader(Dataset):
             features_path,
             tokenizer,
             max_words=30,
-            feature_framerate=1.0,
+            feature_framerate=1,
             max_frames=100,
             unfold_sentences=False,
             image_resolution=224,
             frame_order=0,
             slice_framepos=0,
+            use_ram=False
     ):
         self.csv = pd.read_csv(csv_path)
         self.data = json.load(open(json_path, 'r'))
@@ -166,8 +167,12 @@ class MSRVTT_TrainDataLoader(Dataset):
         self.slice_framepos = slice_framepos
         assert self.slice_framepos in [0, 1, 2]
 
+        self.use_ram = use_ram
         self.unfold_sentences = unfold_sentences
         self.sample_len = 0
+
+        self.rawVideoExtractor = RawVideoExtractor(framerate=feature_framerate, size=image_resolution)
+        
         if self.unfold_sentences:
             train_video_ids = list(self.csv['video_id'].values)
             self.sentences_dict = {}
@@ -175,6 +180,8 @@ class MSRVTT_TrainDataLoader(Dataset):
                 if itm['video_id'] in train_video_ids:
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
+            if use_ram:
+                self.prepare_video_datas_with_ram(train_video_ids)
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)
@@ -194,13 +201,22 @@ class MSRVTT_TrainDataLoader(Dataset):
                 self.children_video_ids[url_posfix].append(vid)
             self.sample_len = len(self.csv)
 
-        self.rawVideoExtractor = RawVideoExtractor(framerate=feature_framerate, size=image_resolution)
         self.SPECIAL_TOKEN = {"CLS_TOKEN": "<|startoftext|>", "SEP_TOKEN": "<|endoftext|>",
                               "MASK_TOKEN": "[MASK]", "UNK_TOKEN": "[UNK]", "PAD_TOKEN": "[PAD]"}
-
+        
+        
     def __len__(self):
         return self.sample_len
+    def prepare_video_datas_with_ram(self, video_ids):
+        self.video_dict = {}
+        for video_id in video_ids:
+            video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
+            if os.path.exists(video_path) is False:
+                video_path = video_path.replace(".mp4", ".webm")
+            raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
+            self.video_dict[video_id] = raw_video_data['video']
 
+    @nvtx.annotate("_get_text()", color="purple")
     def _get_text(self, video_id, caption=None):
         k = 1
         choice_video_ids = [video_id]
@@ -243,6 +259,7 @@ class MSRVTT_TrainDataLoader(Dataset):
         words = self.tokenizer.tokenize(caption)
         return words
 
+    @nvtx.annotate("_get_rawvideo()", color="purple")
     def _get_rawvideo(self, choice_video_ids):
         video_mask = np.zeros((len(choice_video_ids), self.max_frames), dtype=np.long)
         max_video_length = [0] * len(choice_video_ids)
@@ -251,14 +268,18 @@ class MSRVTT_TrainDataLoader(Dataset):
         video = np.zeros((len(choice_video_ids), self.max_frames, 1, 3,
                           self.rawVideoExtractor.size, self.rawVideoExtractor.size), dtype=np.float)
 
+############### 여기서 아이디 받아서 미리 저장되어있는 dict에서 맞는 값 가져오기 
         for i, video_id in enumerate(choice_video_ids):
             # Individual for YoucokII dataset, due to it video format
-            video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
-            if os.path.exists(video_path) is False:
-                video_path = video_path.replace(".mp4", ".webm")
-
-            raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
-            raw_video_data = raw_video_data['video']
+            if self.use_ram:
+                raw_video_data = self.video_dict[video_id]
+            else: 
+                video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
+                if os.path.exists(video_path) is False:
+                    video_path = video_path.replace(".mp4", ".webm")
+                raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
+                raw_video_data = raw_video_data['video']
+                
             if len(raw_video_data.shape) > 3:
                 raw_video_data_clip = raw_video_data
                 # L x T x 3 x H x W
