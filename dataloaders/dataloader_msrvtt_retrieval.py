@@ -191,7 +191,6 @@ class MSRVTT_TrainDataLoader(Dataset):
                     from tqdm import tqdm
                     from multiprocessing.pool import ThreadPool
                     import multiprocessing as mp 
-                    import sys 
                     LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))
                     result = ThreadPool(num_workers or mp.cpu_count()).imap(self.prepare_video_datas_with_ram, train_video_ids)
                     pbar = tqdm(enumerate(result), total=len(train_video_ids), disable=LOCAL_RANK > 0)
@@ -202,7 +201,6 @@ class MSRVTT_TrainDataLoader(Dataset):
                         pbar.desc = f'Caching images ({b / gb:.2f}GB RAM)'
                     pbar.close()
                     ############################################
-                    self.video_dict = {r[0]:r[1] for r in result}
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)

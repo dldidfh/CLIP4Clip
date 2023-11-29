@@ -19,8 +19,8 @@ def torch_distributed_zero_first(local_rank: int): # https://github.com/ultralyt
         dist.barrier(device_ids=[0])
 
 def dataloader_msrvtt_train(args, tokenizer):
-    # with torch_distributed_zero_first(args.rank) :
-    msrvtt_dataset = MSRVTT_TrainDataLoader(
+    with torch_distributed_zero_first(args.rank) :
+        msrvtt_dataset = MSRVTT_TrainDataLoader(
             csv_path=args.train_csv,
             json_path=args.data_path,
             features_path=args.features_path,
