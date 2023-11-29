@@ -12,7 +12,6 @@ import json
 import random
 from dataloaders.rawvideo_util import RawVideoExtractor
 import nvtx 
-from tqdm import tqdm 
 class MSRVTT_DataLoader(Dataset):
     """MSRVTT dataset loader."""
     def __init__(
@@ -162,6 +161,7 @@ class MSRVTT_TrainDataLoader(Dataset):
         self.max_words = max_words
         self.max_frames = max_frames
         self.tokenizer = tokenizer
+        self.image_resolution = image_resolution
         # 0: ordinary order; 1: reverse order; 2: random order.
         self.frame_order = frame_order
         assert self.frame_order in [0, 1, 2]
@@ -183,26 +183,26 @@ class MSRVTT_TrainDataLoader(Dataset):
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
             if use_ram:
-                # from tqdm.contrib.concurrent import process_map
-                from tqdm import tqdm
-                from multiprocessing.pool import ThreadPool
-                import multiprocessing as mp 
-                LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))
                 self.video_dict = {}
-                # chunk_size = len(train_video_ids) // ((num_workers or mp.cpu_count()) * 2)
-                result = ThreadPool(num_workers or mp.cpu_count()).imap(self.prepare_video_datas_with_ram, train_video_ids)
-                pbar = tqdm(enumerate(result), total=len(train_video_ids), disable=LOCAL_RANK > 0)
-                gb = 1 << 30 
-                for i, x in pbar:
-                    self.video_dict[x[0]] = x[1]
-                    b = x[1].nbytes
-                    pbar.desc = f'Caching images ({b / gb:.1f}GB RAM)'
-                pbar.close()
-                # result = process_map(self.prepare_video_datas_with_ram, train_video_ids, max_workers=num_workers or mp.cpu_count(), chunksize=chunk_size)
-                # result = [self.prepare_video_datas_with_ram(id) for id in tqdm(train_video_ids)]
-                # with mp.Pool(num_workers or mp.cpu_count()) as p: 
-                    # result = p.map(self.prepare_video_datas_with_ram, train_video_ids)
-                # self.video_dict = {r[0]:r[1] for r in result}
+                # result = [self.prepare_video_datas_with_ram(p) for p in train_video_ids]
+                ############################################
+                self.use_ram = self.check_cache_ram(train_video_ids)
+                if self.use_ram:
+                    from tqdm import tqdm
+                    from multiprocessing.pool import ThreadPool
+                    import multiprocessing as mp 
+                    import sys 
+                    LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))
+                    result = ThreadPool(num_workers or mp.cpu_count()).imap(self.prepare_video_datas_with_ram, train_video_ids)
+                    pbar = tqdm(enumerate(result), total=len(train_video_ids), disable=LOCAL_RANK > 0)
+                    b, gb = 0, 1 << 30
+                    for _, x in pbar:
+                        self.video_dict[x[0]] = x[1]
+                        b += x[1].nbytes
+                        pbar.desc = f'Caching images ({b / gb:.2f}GB RAM)'
+                    pbar.close()
+                    ############################################
+                    self.video_dict = {r[0]:r[1] for r in result}
         else:
             num_sentences = 0
             self.sentences = defaultdict(list)
@@ -228,13 +228,35 @@ class MSRVTT_TrainDataLoader(Dataset):
         
     def __len__(self):
         return self.sample_len
-    # @staticmethod
+    
+    def check_cache_ram(self, train_video_ids, safety_margin=0.15, prefix=''): # https://github.com/ultralytics/yolov5/blob/master/utils/dataloaders.py#L434
+        import cv2 
+        import psutil 
+        # Check image caching requirements vs available memory
+        b, gb = 0, 1<< 30  # bytes of cached images, bytes per gigabytes
+        n = min(self.sample_len, 30)  # extrapolate from 30 random images
+        for _ in range(n):
+            vidoe_path = os.path.join(self.features_path, random.choice(train_video_ids)+ ".mp4")
+            cap = cv2.VideoCapture(vidoe_path)
+            ret, frame = cap.read()
+            if ret : 
+                ratio = self.image_resolution / max(frame.shape[0], frame.shape[1]) 
+                b += frame.nbytes * ratio ** 2 * self.max_frames
+            else: 
+                n = n -1 
+                continue
+        mem_required = b * self.sample_len / n  # GB required to cache dataset into RAM
+        mem = psutil.virtual_memory()
+        cache = mem_required * (1 + safety_margin) < mem.available  # to cache or not to cache, that is the question
+        print(f"required(predicted) mem : {(mem_required*(1+safety_margin)) / gb :.2f}GB \t available mem : {mem.available / gb : .2f}GB")
+        return cache
+    
     def prepare_video_datas_with_ram(self, video_id):
         video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
         if os.path.exists(video_path) is False:
             video_path = video_path.replace(".mp4", ".webm")
         raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
-        return [video_id,raw_video_data['video']]
+        return (video_id,raw_video_data['video'])
 
     @nvtx.annotate("_get_text()", color="purple")
     def _get_text(self, video_id, caption=None):

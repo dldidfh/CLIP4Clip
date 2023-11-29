@@ -6,22 +6,34 @@ from dataloaders.dataloader_msvd_retrieval import MSVD_DataLoader
 from dataloaders.dataloader_lsmdc_retrieval import LSMDC_DataLoader
 from dataloaders.dataloader_activitynet_retrieval import ActivityNet_DataLoader
 from dataloaders.dataloader_didemo_retrieval import DiDeMo_DataLoader
+import torch.distributed as dist 
+from contextlib import contextmanager
+
+@contextmanager
+def torch_distributed_zero_first(local_rank: int): # https://github.com/ultralytics/yolov5/blob/master/utils/torch_utils.py#L89C5-L89C33
+    # Decorator to make all processes in distributed training wait for each local_master to do something
+    if local_rank not in [-1, 0]:
+        dist.barrier(device_ids=[local_rank])
+    yield
+    if local_rank == 0:
+        dist.barrier(device_ids=[0])
 
 def dataloader_msrvtt_train(args, tokenizer):
+    # with torch_distributed_zero_first(args.rank) :
     msrvtt_dataset = MSRVTT_TrainDataLoader(
-        csv_path=args.train_csv,
-        json_path=args.data_path,
-        features_path=args.features_path,
-        max_words=args.max_words,
-        feature_framerate=args.feature_framerate,
-        tokenizer=tokenizer,
-        max_frames=args.max_frames,
-        unfold_sentences=args.expand_msrvtt_sentences,
-        frame_order=args.train_frame_order,
-        slice_framepos=args.slice_framepos,
-        use_ram=args.use_ram,
-        num_workers=args.num_thread_reader
-    )
+            csv_path=args.train_csv,
+            json_path=args.data_path,
+            features_path=args.features_path,
+            max_words=args.max_words,
+            feature_framerate=args.feature_framerate,
+            tokenizer=tokenizer,
+            max_frames=args.max_frames,
+            unfold_sentences=args.expand_msrvtt_sentences,
+            frame_order=args.train_frame_order,
+            slice_framepos=args.slice_framepos,
+            use_ram=args.use_ram,
+            num_workers=args.num_thread_reader
+        )
 
     train_sampler = torch.utils.data.distributed.DistributedSampler(msrvtt_dataset)
     dataloader = DataLoader(
