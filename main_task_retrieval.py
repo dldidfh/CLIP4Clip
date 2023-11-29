@@ -19,7 +19,6 @@ from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
 import nvtx 
 
-
 global logger
 
 def get_args(description='CLIP4Clip on Retrieval Task'):
@@ -120,6 +119,18 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     args.batch_size = int(args.batch_size / args.gradient_accumulation_steps)
     args.local_rank = int(os.environ['LOCAL_RANK'])
     return args
+def ddp_setup(args):
+    
+    rank = int(os.environ['RANK'])
+    local_rank = int(os.environ['LOCAL_RANK'])
+    world_size = int(os.environ['WORLD_SIZE'])
+    torch.distributed.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+    args.world_size = world_size
+    args.rank = rank
+    args.local_rank = local_rank
+
+    return args 
 
 def set_seed_logger(args):
     global logger
@@ -127,18 +138,11 @@ def set_seed_logger(args):
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)
     np.random.seed(args.seed)
-    torch.distributed.init_process_group(backend="nccl")
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)  # if you are using multi-GPU.
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    world_size = torch.distributed.get_world_size()
-    torch.cuda.set_device(args.local_rank)
-    args.world_size = world_size
-    rank = torch.distributed.get_rank()
-    args.rank = rank
-
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir, exist_ok=True)
 
@@ -178,6 +182,8 @@ def init_model(args, device, n_gpu, local_rank):
     model = CLIP4Clip.from_pretrained(args.cross_model, cache_dir=cache_dir, state_dict=model_state_dict, task_config=args)
 
     model.to(device)
+    # model = DDP(model, device_ids=[local_rank])
+
 
     return model
 
@@ -270,22 +276,16 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
 
                 input_ids, input_mask, segment_ids, video, video_mask = batch
                 with nvtx.annotate(f"model inference", color="yellow"):
-                # nvtx.push_range(f"model inference")
                     loss = model(input_ids, segment_ids, input_mask, video, video_mask)
-                # nvtx.pop_range(f"model inference")
 
                 with nvtx.annotate(f"loss calc", color="red"):
-                # nvtx.push_range(f"loss calc")
                     if n_gpu > 1:
                         loss = loss.mean()  # mean() to average on multi-gpu.
                     if args.gradient_accumulation_steps > 1:
                         loss = loss / args.gradient_accumulation_steps
-                # nvtx.pop_range(f"loss calc")
 
                 with nvtx.annotate(f"backward", color="blue"):
-                # nvtx.push_range(f"backward")
                     loss.backward()
-                # nvtx.pop_range(f"backward")
 
                 total_loss += float(loss)
                 if (step + 1) % args.gradient_accumulation_steps == 0:
@@ -481,6 +481,7 @@ def main():
     global logger
     
     args = get_args()
+    args = ddp_setup(args)
     args = set_seed_logger(args)
     device, n_gpu = init_device(args, args.local_rank)
 

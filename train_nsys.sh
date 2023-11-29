@@ -1,11 +1,13 @@
 #!/bin/bash
 
 # /home/ubuntu/anaconda3/envs/clip4clip_train/bin/python -m torch.distributed.launch --nproc_per_node=1 --standalone --nnodes=1 \
-/home/ubuntu/anaconda3/envs/clip4clip_train/bin/torchrun --standalone --nnodes=1 --nproc_per_node=1 \
+
+
+OMP_NUM_THREADS=4 /home/ubuntu/anaconda3/envs/clip4clip_train/bin/torchrun --standalone --nnodes=1 --nproc_per_node=1 \
 main_task_retrieval.py --do_train \
 --num_thread_reader=0 \
 --epochs=2 \
---batch_size=32 \
+--batch_size=64 \
 --n_display=1 \
 --train_csv  './datas/test.csv' \
 --val_csv  './datas/test.csv' \
