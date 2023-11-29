@@ -182,11 +182,12 @@ class MSRVTT_TrainDataLoader(Dataset):
                 if itm['video_id'] in train_video_ids:
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
-            if use_ram:
+            if self.use_ram:
+                self.use_ram = self.check_cache_ram(train_video_ids)
+            if self.use_ram:
                 self.video_dict = {}
                 # result = [self.prepare_video_datas_with_ram(p) for p in train_video_ids]
                 ############################################
-                self.use_ram = self.check_cache_ram(train_video_ids)
                 if self.use_ram:
                     from tqdm import tqdm
                     from multiprocessing.pool import ThreadPool
@@ -227,7 +228,7 @@ class MSRVTT_TrainDataLoader(Dataset):
     def __len__(self):
         return self.sample_len
     
-    def check_cache_ram(self, train_video_ids, safety_margin=0.15, prefix=''): # https://github.com/ultralytics/yolov5/blob/master/utils/dataloaders.py#L434
+    def check_cache_ram(self, train_video_ids, safety_margin=0.1, prefix=''): # https://github.com/ultralytics/yolov5/blob/master/utils/dataloaders.py#L434
         import cv2 
         import psutil 
         # Check image caching requirements vs available memory
@@ -243,7 +244,7 @@ class MSRVTT_TrainDataLoader(Dataset):
             else: 
                 n = n -1 
                 continue
-        mem_required = b * self.sample_len / n  # GB required to cache dataset into RAM
+        mem_required = (b * self.sample_len) / n  # GB required to cache dataset into RAM
         mem = psutil.virtual_memory()
         cache = mem_required * (1 + safety_margin) < mem.available  # to cache or not to cache, that is the question
         print(f"required(predicted) mem : {(mem_required*(1+safety_margin)) / gb :.2f}GB \t available mem : {mem.available / gb : .2f}GB")

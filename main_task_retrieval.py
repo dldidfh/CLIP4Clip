@@ -4,9 +4,9 @@ from __future__ import unicode_literals
 from __future__ import print_function
 
 import torch
+import os
 import numpy as np
 import random
-import os
 from metrics import compute_metrics, tensor_text_to_video_metrics, tensor_video_to_text_sim
 import time
 import argparse
@@ -18,7 +18,7 @@ from modules.optimization import BertAdam
 from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
 import nvtx 
-torch.distributed.init_process_group(backend="nccl")
+
 
 global logger
 
@@ -75,7 +75,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument("--datatype", default="msrvtt", type=str, help="Point the dataset to finetune.")
 
     parser.add_argument("--world_size", default=0, type=int, help="distribted training")
-    parser.add_argument("--local-rank", default=0, type=int, help="distribted training")
+    # parser.add_argument("--local-rank", default=0, type=int, help="distribted training")
     parser.add_argument("--rank", default=0, type=int, help="distribted training")
     parser.add_argument('--coef_lr', type=float, default=1., help='coefficient for bert branch.')
     parser.add_argument('--use_mil', action='store_true', help="Whether use MIL as Miech et. al. (2020).")
@@ -118,7 +118,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
         raise ValueError("At least one of `do_train` or `do_eval` must be True.")
 
     args.batch_size = int(args.batch_size / args.gradient_accumulation_steps)
-
+    args.local_rank = int(os.environ['LOCAL_RANK'])
     return args
 
 def set_seed_logger(args):
@@ -127,12 +127,12 @@ def set_seed_logger(args):
     random.seed(args.seed)
     os.environ['PYTHONHASHSEED'] = str(args.seed)
     np.random.seed(args.seed)
+    torch.distributed.init_process_group(backend="nccl")
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)  # if you are using multi-GPU.
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-
     world_size = torch.distributed.get_world_size()
     torch.cuda.set_device(args.local_rank)
     args.world_size = world_size
@@ -479,6 +479,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
 
 def main():
     global logger
+    
     args = get_args()
     args = set_seed_logger(args)
     device, n_gpu = init_device(args, args.local_rank)
