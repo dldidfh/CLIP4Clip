@@ -156,6 +156,7 @@ class MSRVTT_TrainDataLoader(Dataset):
             frame_order=0,
             slice_framepos=0,
             use_ram=False,
+            cache_margin=0.1,
             num_workers=0,
     ):
         self.csv = pd.read_csv(csv_path)
@@ -189,7 +190,7 @@ class MSRVTT_TrainDataLoader(Dataset):
                     self.sentences_dict[len(self.sentences_dict)] = (itm['video_id'], itm['caption'])
             self.sample_len = len(self.sentences_dict)
             if self.use_ram:
-                self.use_ram = self.check_cache_ram(train_video_ids)
+                self.use_ram = self.check_cache_ram(train_video_ids, safety_margin=cache_margin)
             if self.use_ram:
                 self.video_dict = {}
                 # result = [self.prepare_video_datas_with_ram(p) for p in train_video_ids]
@@ -251,9 +252,12 @@ class MSRVTT_TrainDataLoader(Dataset):
             vidoe_path = os.path.join(self.features_path, random.choice(train_video_ids)+ ".mp4")
             cap = cv2.VideoCapture(vidoe_path)
             ret, frame = cap.read()
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            frame_cnt = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            frames_num = max(frame_cnt // fps , self.max_frames)
             if ret : 
                 ratio = self.image_resolution / max(frame.shape[0], frame.shape[1]) 
-                b += ( frame.astype(np.float32).nbytes * ratio**2 * self.max_frames)
+                b += ( frame.astype(np.float32).nbytes * ratio**2 * frames_num)
             else: 
                 n = n -1 
         mem_required = b * len(self.csv) / n  # GB required to cache dataset into RAM

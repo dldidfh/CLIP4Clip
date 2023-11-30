@@ -104,6 +104,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument("--pretrained_clip_name", default="ViT-B/32", type=str, help="Choose a CLIP version")
 
     parser.add_argument('--use_ram', action='store_true', help="store dataset in ram or read from file every iterations")
+    parser.add_argument('--cache_margin', type=float, default=0.1, help='ram cache calc margin')
     args = parser.parse_args()
 
     if args.sim_header == "tightTransf":

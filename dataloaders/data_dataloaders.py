@@ -32,6 +32,7 @@ def dataloader_msrvtt_train(args, tokenizer):
             frame_order=args.train_frame_order,
             slice_framepos=args.slice_framepos,
             use_ram=args.use_ram,
+            cache_margin=args.cache_margin,
             num_workers=args.num_thread_reader
         )
 
