@@ -11,7 +11,10 @@ from collections import defaultdict
 import json
 import random
 from dataloaders.rawvideo_util import RawVideoExtractor
+from dataloaders.use_ram_dataloader import ram_raw_video_extractor
 import nvtx 
+import torch 
+
 class MSRVTT_DataLoader(Dataset):
     """MSRVTT dataset loader."""
     def __init__(
@@ -138,6 +141,7 @@ class MSRVTT_DataLoader(Dataset):
 
 class MSRVTT_TrainDataLoader(Dataset):
     """MSRVTT train dataset loader."""
+    @nvtx.annotate("data loader init", color="yellow")
     def __init__(
             self,
             csv_path,
@@ -174,7 +178,9 @@ class MSRVTT_TrainDataLoader(Dataset):
         self.sample_len = 0
 
         self.rawVideoExtractor = RawVideoExtractor(framerate=feature_framerate, size=image_resolution)
-        
+        # if use_ram:
+        #     self.ram_raw_video_extractor = ram_raw_video_extractor(feature_path=features_path, img_size=image_resolution,sample_fq=feature_framerate,max_frame=max_frames)
+        #     self.ram_transform = self.ram_raw_video_extractor.transform()
         if self.unfold_sentences:
             train_video_ids = list(self.csv['video_id'].values)
             self.sentences_dict = {}
@@ -192,12 +198,19 @@ class MSRVTT_TrainDataLoader(Dataset):
                     from tqdm import tqdm
                     from multiprocessing.pool import ThreadPool
                     import multiprocessing as mp 
+                    import sys 
                     LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))
-                    result = ThreadPool(num_workers or mp.cpu_count()).imap(self.prepare_video_datas_with_ram, train_video_ids)
+                    result = ThreadPool(num_workers or mp.cpu_count()).imap(
+                        self.prepare_video_datas_with_ram, 
+                        # self.ram_raw_video_extractor.prepare_video_datas_with_ram, 
+                        train_video_ids)
                     pbar = tqdm(enumerate(result), total=len(train_video_ids), disable=LOCAL_RANK > 0)
                     b, gb = 0, 1 << 30
                     for _, x in pbar:
                         self.video_dict[x[0]] = x[1]
+                        # b += sys.getsizeof(x[1][0].tobytes())*self.max_frames # 6.73GB
+                        # b += sum([sys.getsizeof(i.tobytes()) for i in x[1]]) # 5.53GB
+                        # sys.getsizeof(Image.fromarray(frame_rgb).tobytes())
                         b += x[1].nbytes
                         pbar.desc = f'Caching images ({b / gb:.2f}GB RAM)'
                     pbar.close()
@@ -233,18 +246,17 @@ class MSRVTT_TrainDataLoader(Dataset):
         import psutil 
         # Check image caching requirements vs available memory
         b, gb = 0, 1<< 30  # bytes of cached images, bytes per gigabytes
-        n = min(self.sample_len, 30)  # extrapolate from 30 random images
+        n = min(len(self.csv), 60)  # extrapolate from 30 random images
         for _ in range(n):
             vidoe_path = os.path.join(self.features_path, random.choice(train_video_ids)+ ".mp4")
             cap = cv2.VideoCapture(vidoe_path)
             ret, frame = cap.read()
             if ret : 
                 ratio = self.image_resolution / max(frame.shape[0], frame.shape[1]) 
-                b += frame.nbytes * ratio ** 2 * self.max_frames
+                b += ( frame.astype(np.float32).nbytes * ratio**2 * self.max_frames)
             else: 
                 n = n -1 
-                continue
-        mem_required = (b * self.sample_len) / n  # GB required to cache dataset into RAM
+        mem_required = b * len(self.csv) / n  # GB required to cache dataset into RAM
         mem = psutil.virtual_memory()
         cache = mem_required * (1 + safety_margin) < mem.available  # to cache or not to cache, that is the question
         print(f"required(predicted) mem : {(mem_required*(1+safety_margin)) / gb :.2f}GB \t available mem : {mem.available / gb : .2f}GB")
@@ -300,7 +312,7 @@ class MSRVTT_TrainDataLoader(Dataset):
         words = self.tokenizer.tokenize(caption)
         return words
 
-    @nvtx.annotate("_get_rawvideo()", color="purple")
+    # @nvtx.annotate("_get_rawvideo()", color="purple")
     def _get_rawvideo(self, choice_video_ids):
         video_mask = np.zeros((len(choice_video_ids), self.max_frames), dtype=np.long)
         max_video_length = [0] * len(choice_video_ids)
@@ -314,6 +326,7 @@ class MSRVTT_TrainDataLoader(Dataset):
             # Individual for YoucokII dataset, due to it video format
             if self.use_ram:
                 raw_video_data = self.video_dict[video_id]
+                # raw_video_data = torch.stack([self.ram_transform(im) for im in self.video_dict[video_id]])
             else: 
                 video_path = os.path.join(self.features_path, "{}.mp4".format(video_id))
                 if os.path.exists(video_path) is False:
@@ -352,6 +365,7 @@ class MSRVTT_TrainDataLoader(Dataset):
 
         return video, video_mask
 
+    @nvtx.annotate("__getitem__", color="white")
     def __getitem__(self, idx):
         if self.unfold_sentences:
             video_id, caption = self.sentences_dict[idx]

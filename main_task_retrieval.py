@@ -258,7 +258,7 @@ def load_model(epoch, args, n_gpu, device, model_file=None):
 
 def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, scheduler, global_step, local_rank=0):
     global logger
-    with nvtx.annotate(f"train start epoch{epoch}", color="purple"):
+    with nvtx.annotate(f"train start epoch{epoch}", color="blue"):
     # nvtx.push_range(f"train start epoch{epoch}", color="purple")
         torch.cuda.empty_cache()
         model.train()
