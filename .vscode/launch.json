@@ -1,0 +1,49 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "module": "torch.distributed.launch",
+            "request": "launch",
+            // "program": "/home/ubuntu/anaconda3/envs/clip4clip_train/bin/python",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                // "torch.distributed.launch",
+                "--nnodes=1", "--nproc_per_node=2",
+                "main_task_retrieval.py", 
+                "--do_eval", 
+                "--num_thread_reader=0", 
+                "--epochs=2", 
+                "--batch_size=4", 
+                "--n_display=1", 
+                "--train_csv",  "./datas/test.csv", 
+                "--val_csv",  "./datas/test.csv", 
+                "--data_path", "./datas/test.json", 
+                "--features_path", "./datas/videos/piadata_224_fps3_cutting/", 
+                "--output_dir", "./ckpts/nsight_system_test", 
+                "--lr=1e-3",
+                "--max_words=32",
+                "--max_frames=12",
+                "--batch_size_val=64", 
+                "--datatype=msrvtt", 
+                "--expand_msrvtt_sentences",  
+                "--feature_framerate=1", 
+                "--coef_lr=1e-3", 
+                "--freeze_layer_num=0",  
+                "--slice_framepos=2", 
+                "--loose_type", 
+                "--linear_patch=2d", 
+                "--sim_header=meanP", 
+                "--pretrained_clip_name=ViT-B/32", 
+                "--save_matrix",
+                "--init_model", "ckpts/nsight_system_test/pytorch_model.bin.1"
+                
+            ]
+        }
+    ]
+}

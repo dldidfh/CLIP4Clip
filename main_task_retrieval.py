@@ -74,7 +74,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument("--datatype", default="msrvtt", type=str, help="Point the dataset to finetune.")
 
     parser.add_argument("--world_size", default=0, type=int, help="distribted training")
-    # parser.add_argument("--local-rank", default=0, type=int, help="distribted training")
+    parser.add_argument("--local_rank", default=0, type=int, help="distribted training")
     parser.add_argument("--rank", default=0, type=int, help="distribted training")
     parser.add_argument('--coef_lr', type=float, default=1., help='coefficient for bert branch.')
     parser.add_argument('--use_mil', action='store_true', help="Whether use MIL as Miech et. al. (2020).")
@@ -105,6 +105,9 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
 
     parser.add_argument('--use_ram', action='store_true', help="store dataset in ram or read from file every iterations")
     parser.add_argument('--cache_margin', type=float, default=0.1, help='ram cache calc margin')
+
+    parser.add_argument('--save_matrix', action='store_true', help="save sim matrix to csv ")
+
     args = parser.parse_args()
 
     if args.sim_header == "tightTransf":
@@ -308,11 +311,12 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
                     global_step += 1
                     if global_step % log_step == 0 and local_rank == 0:
                         logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
-                                    args.epochs, step + 1,
-                                    len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
-                                    float(loss),
-                                    (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
-                        start_time = time.time()
+                            args.epochs, step + 1,
+                            len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
+                            # len(train_dataloader), " / ".join([str('%.9f'%itm['lr']) for itm in optimizer.param_groups]),
+                            float(loss),
+                            (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
+                start_time = time.time()
             # nvtx.pop_range(f"epoch {epoch} step {step}")
 
         total_loss = total_loss / len(train_dataloader)
@@ -337,7 +341,7 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
     return sim_matrix
 
 @nvtx.annotate("eval_epoch()", color="purple")
-def eval_epoch(args, model, test_dataloader, device, n_gpu):
+def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
 
     if hasattr(model, 'module'):
         model = model.module.to(device)
@@ -369,13 +373,15 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
     with torch.no_grad():
         batch_list_t = []
         batch_list_v = []
+        batch_video_id = []
         batch_sequence_output_list, batch_visual_output_list = [], []
         total_video_num = 0
 
         # ----------------------------
         # 1. cache the features
         # ----------------------------
-        for bid, batch in enumerate(test_dataloader):
+        for bid, batch_o in enumerate(test_dataloader):
+            batch, video_id = batch_o[:-1], batch_o[-1]
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
 
@@ -394,6 +400,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
                     visual_output = model.get_visual_output(video, video_mask)
                     batch_visual_output_list.append(visual_output)
                     batch_list_v.append((video_mask,))
+                batch_video_id.append(video_id)
                 total_video_num += b
             else:
                 sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
@@ -403,6 +410,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
 
                 batch_visual_output_list.append(visual_output)
                 batch_list_v.append((video_mask,))
+                batch_video_id.append(video_id)
 
             print("{}/{}\r".format(bid, len(test_dataloader)), end="")
 
@@ -467,6 +475,24 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         tv_metrics = compute_metrics(sim_matrix)
         vt_metrics = compute_metrics(sim_matrix.T)
         logger.info('\t Length-T: {}, Length-V:{}'.format(len(sim_matrix), len(sim_matrix[0])))
+    if args.save_matrix: 
+        with open(f"{os.path.join(args.output_dir, f'sim_matrix_{epoch}.csv')}", "w") as wsim : 
+            s = ""
+            # write video id 
+            for video_id_list in batch_video_id: 
+                for video_id in video_id_list:
+                    s += f"{video_id}, "
+            s == "max"
+            wsim.write(s + "\n")
+            # write sim matrix
+            for t in sim_matrix:
+                s = ""
+                for v in t: 
+                    s += f"{v:.4f}, "
+                argmax = (np.argmax(t) + 1)
+                s += f"{argmax}\n"
+
+                wsim.write(s)
 
     logger.info("Text-to-Video:")
     logger.info('\t>>>  R@1: {:.1f} - R@5: {:.1f} - R@10: {:.1f} - Median R: {:.1f} - Mean R: {:.1f}'.
@@ -584,7 +610,7 @@ def main():
                 # logger.info("Eval on val dataset")
                 # R1 = eval_epoch(args, model, val_dataloader, device, n_gpu)
 
-                R1 = eval_epoch(args, model, test_dataloader, device, n_gpu)
+                R1 = eval_epoch(args, model, test_dataloader, device, n_gpu, epoch=epoch)
                 if best_score <= R1:
                     best_score = R1
                     best_output_model_file = output_model_file
