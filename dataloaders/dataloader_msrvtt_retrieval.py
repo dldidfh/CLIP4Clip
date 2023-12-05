@@ -137,7 +137,10 @@ class MSRVTT_DataLoader(Dataset):
 
         pairs_text, pairs_mask, pairs_segment, choice_video_ids = self._get_text(video_id, sentence)
         video, video_mask = self._get_rawvideo(choice_video_ids)
-        return pairs_text, pairs_mask, pairs_segment, video, video_mask, video_id
+        if 'activity' in self.data : 
+            activity = self.data['activity'].values[idx]
+            return pairs_text, pairs_mask, pairs_segment, video, video_mask, video_id, activity , sentence
+        else : return pairs_text, pairs_mask, pairs_segment, video, video_mask, video_id
 
 class MSRVTT_TrainDataLoader(Dataset):
     """MSRVTT train dataset loader."""

@@ -14,7 +14,7 @@ from modules.tokenization_clip import SimpleTokenizer as ClipTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
 from modules.modeling import CLIP4Clip
 from modules.optimization import BertAdam
-
+from postprocess.save_matrix import save_matrix
 from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
 import nvtx 
@@ -341,7 +341,7 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
     return sim_matrix
 
 @nvtx.annotate("eval_epoch()", color="purple")
-def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
+def eval_epoch(args, model, test_dataloader,  device, n_gpu):
 
     if hasattr(model, 'module'):
         model = model.module.to(device)
@@ -374,6 +374,8 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
         batch_list_t = []
         batch_list_v = []
         batch_video_id = []
+        batch_activity = []
+        batch_sentences = []
         batch_sequence_output_list, batch_visual_output_list = [], []
         total_video_num = 0
 
@@ -381,7 +383,14 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
         # 1. cache the features
         # ----------------------------
         for bid, batch_o in enumerate(test_dataloader):
-            batch, video_id = batch_o[:-1], batch_o[-1]
+            if len(batch_o) == 6 : 
+                batch, video_id = batch_o[:-1], batch_o[-1]
+                batch_video_id.append(video_id)
+            elif len(batch_o) > 6 : 
+                batch, video_id, activity, sentence = batch_o[:-3], batch_o[-3], batch_o[-2], batch_o[-1]
+                batch_video_id.append(video_id)
+                batch_activity.append(activity)
+                batch_sentences.append(sentence)
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
 
@@ -391,7 +400,6 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
                 sequence_output = model.get_sequence_output(input_ids, segment_ids, input_mask)
                 batch_sequence_output_list.append(sequence_output)
                 batch_list_t.append((input_mask, segment_ids,))
-
                 s_, e_ = total_video_num, total_video_num + b
                 filter_inds = [itm - s_ for itm in cut_off_points_ if itm >= s_ and itm < e_]
 
@@ -400,7 +408,6 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
                     visual_output = model.get_visual_output(video, video_mask)
                     batch_visual_output_list.append(visual_output)
                     batch_list_v.append((video_mask,))
-                batch_video_id.append(video_id)
                 total_video_num += b
             else:
                 sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
@@ -410,7 +417,7 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
 
                 batch_visual_output_list.append(visual_output)
                 batch_list_v.append((video_mask,))
-                batch_video_id.append(video_id)
+                
 
             print("{}/{}\r".format(bid, len(test_dataloader)), end="")
 
@@ -476,23 +483,11 @@ def eval_epoch(args, model, test_dataloader,  device, n_gpu, epoch=0):
         vt_metrics = compute_metrics(sim_matrix.T)
         logger.info('\t Length-T: {}, Length-V:{}'.format(len(sim_matrix), len(sim_matrix[0])))
     if args.save_matrix: 
-        with open(f"{os.path.join(args.output_dir, f'sim_matrix_{epoch}.csv')}", "w") as wsim : 
-            s = ""
-            # write video id 
-            for video_id_list in batch_video_id: 
-                for video_id in video_id_list:
-                    s += f"{video_id}, "
-            s == "max"
-            wsim.write(s + "\n")
-            # write sim matrix
-            for t in sim_matrix:
-                s = ""
-                for v in t: 
-                    s += f"{v:.4f}, "
-                argmax = (np.argmax(t) + 1)
-                s += f"{argmax}\n"
-
-                wsim.write(s)
+        if len(batch_activity) > 0 :
+            save_matrix(args, batch_video_id, sim_matrix, batch_activity, batch_sentences)
+        else: 
+            save_matrix(args, batch_video_id, sim_matrix)
+        
 
     logger.info("Text-to-Video:")
     logger.info('\t>>>  R@1: {:.1f} - R@5: {:.1f} - R@10: {:.1f} - Median R: {:.1f} - Mean R: {:.1f}'.
@@ -610,7 +605,7 @@ def main():
                 # logger.info("Eval on val dataset")
                 # R1 = eval_epoch(args, model, val_dataloader, device, n_gpu)
 
-                R1 = eval_epoch(args, model, test_dataloader, device, n_gpu, epoch=epoch)
+                R1 = eval_epoch(args, model, test_dataloader, device, n_gpu)
                 if best_score <= R1:
                     best_score = R1
                     best_output_model_file = output_model_file
