@@ -5,7 +5,7 @@ from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 # pip install opencv-python
 import cv2
-import nvtx
+# import nvtx
 class RawVideoExtractorCV2():
     def __init__(self, centercrop=False, size=224, framerate=-1, ):
         self.centercrop = centercrop

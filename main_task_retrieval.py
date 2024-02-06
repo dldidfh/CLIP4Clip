@@ -263,65 +263,56 @@ def load_model(epoch, args, n_gpu, device, model_file=None):
 
 def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, scheduler, global_step, local_rank=0):
     global logger
-    with nvtx.annotate(f"train start epoch{epoch}", color="blue"):
-    # nvtx.push_range(f"train start epoch{epoch}", color="purple")
-        torch.cuda.empty_cache()
-        model.train()
-        log_step = args.n_display
+    torch.cuda.empty_cache()
+    model.train()
+    log_step = args.n_display
+    start_time = time.time()
+    total_loss = 0
+
+    for step, batch in enumerate(train_dataloader):
+        
+        if n_gpu == 1:
+            # multi-gpu does scattering it-self
+            batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
+
+        input_ids, input_mask, segment_ids, video, video_mask = batch
+        loss = model(input_ids, segment_ids, input_mask, video, video_mask)
+
+        if n_gpu > 1:
+            loss = loss.mean()  # mean() to average on multi-gpu.
+        if args.gradient_accumulation_steps > 1:
+            loss = loss / args.gradient_accumulation_steps
+
+        loss.backward()
+
+        total_loss += float(loss)
+        if (step + 1) % args.gradient_accumulation_steps == 0:
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+            if scheduler is not None:
+                scheduler.step()  # Update learning rate schedule
+
+            optimizer.step()
+            optimizer.zero_grad()
+
+            # https://github.com/openai/CLIP/issues/46
+            if hasattr(model, 'module'):
+                torch.clamp_(model.module.clip.logit_scale.data, max=np.log(100))
+            else:
+                torch.clamp_(model.clip.logit_scale.data, max=np.log(100))
+
+            global_step += 1
+            if global_step % log_step == 0 and local_rank == 0:
+                logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
+                    args.epochs, step + 1,
+                    len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
+                    # len(train_dataloader), " / ".join([str('%.9f'%itm['lr']) for itm in optimizer.param_groups]),
+                    float(loss),
+                    (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
         start_time = time.time()
-        total_loss = 0
 
-        for step, batch in enumerate(train_dataloader):
-            
-            with nvtx.annotate(f"epoch {epoch} step {step}", color="green"):
-            # nvtx.push_range(f"epoch {epoch} step {step}", color="green")
-                if n_gpu == 1:
-                    # multi-gpu does scattering it-self
-                    batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
-
-                input_ids, input_mask, segment_ids, video, video_mask = batch
-                with nvtx.annotate(f"model inference", color="yellow"):
-                    loss = model(input_ids, segment_ids, input_mask, video, video_mask)
-
-                with nvtx.annotate(f"loss calc", color="red"):
-                    if n_gpu > 1:
-                        loss = loss.mean()  # mean() to average on multi-gpu.
-                    if args.gradient_accumulation_steps > 1:
-                        loss = loss / args.gradient_accumulation_steps
-
-                with nvtx.annotate(f"backward", color="blue"):
-                    loss.backward()
-
-                total_loss += float(loss)
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
-                    if scheduler is not None:
-                        scheduler.step()  # Update learning rate schedule
-
-                    optimizer.step()
-                    optimizer.zero_grad()
-
-                    # https://github.com/openai/CLIP/issues/46
-                    if hasattr(model, 'module'):
-                        torch.clamp_(model.module.clip.logit_scale.data, max=np.log(100))
-                    else:
-                        torch.clamp_(model.clip.logit_scale.data, max=np.log(100))
-
-                    global_step += 1
-                    if global_step % log_step == 0 and local_rank == 0:
-                        logger.info("Epoch: %d/%s, Step: %d/%d, Lr: %s, Loss: %f, Time/step: %f", epoch + 1,
-                            args.epochs, step + 1,
-                            len(train_dataloader), "-".join([str('%.9f'%itm) for itm in sorted(list(set(optimizer.get_lr())))]),
-                            # len(train_dataloader), " / ".join([str('%.9f'%itm['lr']) for itm in optimizer.param_groups]),
-                            float(loss),
-                            (time.time() - start_time) / (log_step * args.gradient_accumulation_steps))
-                start_time = time.time()
-            # nvtx.pop_range(f"epoch {epoch} step {step}")
-
-        total_loss = total_loss / len(train_dataloader)
-        # nvtx.pop_range(f"train start epoch{epoch}")
+    total_loss = total_loss / len(train_dataloader)
     return total_loss, global_step
 
 def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_list, batch_visual_output_list):
@@ -341,7 +332,7 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
         sim_matrix.append(each_row)
     return sim_matrix
 
-@nvtx.annotate("eval_epoch()", color="purple")
+# @nvtx.annotate("eval_epoch()", color="purple")
 def eval_epoch(args, model, test_dataloader,  device, n_gpu):
 
     if hasattr(model, 'module'):

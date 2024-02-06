@@ -418,7 +418,7 @@ class CLIP(nn.Module):
         if pretrained_clip_name in _MODELS and pretrained_clip_name in _PT_NAME:
             model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _PT_NAME[pretrained_clip_name])
 
-        if pretrained_clip_name in ["ViT-B/32", "ViT-B/16"] and os.path.exists(model_path):
+        if pretrained_clip_name in ["ViT-B/32", "ViT-B/16", "ViT-L/14", "ViT-L/14@336px"] and os.path.exists(model_path):
             pass
         else:
             if pretrained_clip_name in _MODELS:

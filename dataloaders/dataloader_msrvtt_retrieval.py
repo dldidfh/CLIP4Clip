@@ -35,6 +35,7 @@ class MSRVTT_DataLoader(Dataset):
         self.max_words = max_words
         self.max_frames = max_frames
         self.tokenizer = tokenizer
+        self.image_resolution = image_resolution
         # 0: ordinary order; 1: reverse order; 2: random order.
         self.frame_order = frame_order
         assert self.frame_order in [0, 1, 2]
@@ -144,7 +145,7 @@ class MSRVTT_DataLoader(Dataset):
 
 class MSRVTT_TrainDataLoader(Dataset):
     """MSRVTT train dataset loader."""
-    @nvtx.annotate("data loader init", color="yellow")
+    # @nvtx.annotate("data loader init", color="yellow")
     def __init__(
             self,
             csv_path,
@@ -276,7 +277,7 @@ class MSRVTT_TrainDataLoader(Dataset):
         raw_video_data = self.rawVideoExtractor.get_video_data(video_path)
         return (video_id,raw_video_data['video'])
 
-    @nvtx.annotate("_get_text()", color="purple")
+    # @nvtx.annotate("_get_text()", color="purple")
     def _get_text(self, video_id, caption=None):
         k = 1
         choice_video_ids = [video_id]
@@ -372,7 +373,7 @@ class MSRVTT_TrainDataLoader(Dataset):
 
         return video, video_mask
 
-    @nvtx.annotate("__getitem__", color="white")
+    # @nvtx.annotate("__getitem__", color="white")
     def __getitem__(self, idx):
         if self.unfold_sentences:
             video_id, caption = self.sentences_dict[idx]
