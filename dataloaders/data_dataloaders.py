@@ -59,6 +59,7 @@ def dataloader_msrvtt_test(args, tokenizer, subset="test"):
         max_frames=args.max_frames,
         frame_order=args.eval_frame_order,
         slice_framepos=args.slice_framepos,
+        image_resolution=args.image_resolution
     )
     dataloader_msrvtt = DataLoader(
         msrvtt_testset,
